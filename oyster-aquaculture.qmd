@@ -1,0 +1,332 @@
+---
+title: "Oyster Aquaculture Suitability in EEZ on the West Coast"
+author: "Luna Herschenfeld-Catalan"
+date: "2022-12-3"
+output:
+    html_document:
+      print_df: paged
+      toc: yes
+      toc_depth: 4
+      toc_float: yes
+---
+
+# Background
+
+### Goals
+
+-   An overview of the goals of the workflow
+
+### Datasets
+
+-   including any references
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load libraries
+
+```{r include=TRUE, warning=FALSE, messages=FALSE}
+# load libraries
+library(tidyverse)
+library(sf)
+library(here)
+library(stars) # for .tif files
+library(terra)
+library(paletteer)
+library(tmap)
+library(maps)
+library(patchwork)
+```
+
+## Read in the Data
+
+```{r warning=FALSE, messages=FALSE}
+# load in data for west coast regions
+wc_eez <- st_read(here("data/wc_regions_clean.shp")) %>% 
+  rename(ID = rgn_id)
+
+# read in annual average sea surface temperatures
+file_names <- list.files("data/sst_tifs/",
+                         full.names = TRUE)
+
+# stack the rasters together
+sst_stack <- rast(file_names)
+summary(sst_stack)
+class(sst_stack)
+
+# read in bathymetry ocean depth data
+depth <- read_stars(here("data/depth.tif")) %>% 
+  rast()
+
+```
+
+### Check the crs for the data
+
+```{r eval = FALSE}
+# do the crs match?
+st_crs(wc_eez) == st_crs(sst_stack) # no they do not
+st_crs(wc_eez) == st_crs(depth) # yes
+
+```
+
+The crs for the West Coast data and the Sea Surface temp rasters dont match. We have to re-project so that we can work on them together.
+
+### Reproject
+
+```{r warning=FALSE, messages=FALSE}
+# reproject sst_stack to same crs as wc
+sst_stack <- project(sst_stack, 
+                     crs(wc_eez))
+
+# check if the new object has new crs
+summary(sst_stack)
+
+```
+
+## Prepare the depth and sea surface temp data
+
+To use them together we need to make sure that the resolutions and extents of the objects are the same.
+
+### Make raster with just the mean sea surface temp over the 2008-2012 time period.
+
+```{r warning=FALSE, messages=FALSE}
+# mean from stack
+sst_mean_K <- terra::mean(sst_stack, 
+                        na.rm = TRUE)
+
+# convert values into C by subtracting by 273.15 
+sst_mean <- sst_mean_K - 273.15
+
+sst_mean
+```
+
+### Get depth data with the same resolution as the sea surface temp mean and crop to the same extent as the sea surface temp raster.
+
+```{r include=TRUE, warning=FALSE, messages=FALSE}
+# resample depth to match resolution of sst
+depth_resample <- resample(depth, sst_mean,
+                           method = "near")
+
+# crop the depth raster to the sst raster
+depth_crop <- crop(depth_resample, sst_mean)
+
+```
+
+**Check** the resolutions and extents of the depth and sst rasters:
+
+```{r eval = FALSE}
+# compare what the extents are visually 
+plot(depth)
+plot(sst_mean)
+plot(depth_crop)
+
+# check if the crs match
+st_crs(depth_crop) == st_crs(sst_mean)
+
+# look at the resolutions
+depth_crop
+sst_mean
+```
+
+## Determine which locations are suitable for Oyster aquaculture using depth and temperature parameters.
+
+### Reclassify temperature raster using sea surface temperature: 11-30 deg C
+
+```{r include=TRUE, warning=FALSE, messages=FALSE}
+# sea surface temperature: 11-30&deg C
+rcl_temp <- matrix(c(11, 30, 1, # from EQUAL TO 11 to EQUAL TO 30, set the value to 1
+                     -Inf, 11, NA, # from infinity to 11, set the value to 0
+                     30, Inf, NA), # from greater than 30 to infinity, set the value to 0
+              ncol = 3, byrow = TRUE)
+
+# reclassify
+rcl_sst <- classify(sst_mean, 
+                    rcl = rcl_temp)
+```
+
+### Reclassify depth raster using depth of 0-70 meters below sea level
+
+```{r include=TRUE, warning=FALSE, messages=FALSE}
+# depth: 0-70 meters below sea level
+rcl_depth <- matrix(c(-70, 0, 1, # from EQUAL TO -70 to EQUAL TO 0, set the value to 1
+                      -Inf, -70, NA, # from infinity to less than -70, set the value to 0
+                      0, Inf, NA), # from greater than 0 to infinity, set the value to 0
+              ncol = 3, byrow = TRUE)
+
+# reclassify
+rcl_depth <- classify(depth_crop, 
+                      rcl = rcl_depth)
+
+```
+
+### Combine the reclassified depth and temp layers to find areas that are suitable for oysters
+
+```{r include=TRUE, warning=FALSE, messages=FALSE}
+# create multiplying function : layers that have 0 will multiply to 0 - only the places where it equals 1 in both will be 1 after multiplying 
+rast_mult <- function(layer1, layer2) {
+  (layer1*layer2)
+}
+
+#create stack of the reclassified data
+depth_sst_stack <- c(rcl_sst, rcl_depth)
+
+# apply the function to each layer in the stack
+depth_sst <- lapp(depth_sst_stack, # stacked data
+                  fun = rast_mult) # function
+
+#rename layer as suitable
+names(depth_sst) <- "suitable"
+
+# check if it got renamed
+depth_sst
+
+```
+
+## Determine suitability in the EEZ to investigate which areas have the most potential for oyster marine aquaculture.
+
+Percent of EEZ gives a guide for regions to understand the productivity/economic potential of the area, and quantifying the total area is good for understanding priority for investing in marine oystr aquaculture.
+
+```{r eval = FALSE, include=TRUE}
+# rasterize the eez areas
+id_rast = rasterize(vect(wc_eez), # create a SpatVector to make into a raster
+                    depth_sst, 
+                    field = "rgn") # select layer in database
+
+# cells that are in the right spot
+eez_suitable <- mask(id_rast, depth_sst)
+
+# Compute the area covered by polygons or for all raster cells that are not NA in km
+eez_zonal <- expanse(eez_suitable, 
+                     unit = "km", # output is km2 because its an area
+                     byValue = TRUE)
+
+
+# find the percentage of each zone that is suitable
+wc_eez <- wc_eez %>% 
+  mutate(area = eez_zonal$area,
+         percent = (area/area_km2)*100) # find percent
+
+```
+
+### Suitability area visualization!
+
+Map for the Percent Suitable Area in the Economic zones:
+
+```{r warning=FALSE, messages=FALSE}
+ggplot() +
+  geom_sf(data = wc_eez,
+          aes(fill = percent)) + # percent suitable area
+  paletteer::scale_fill_paletteer_c("ggthemes::Purple") +
+  theme_classic() +
+  labs(fill = "Percent Suitable \nArea",
+       title = "Percent Suitable Area for Oysters In West Coast EEZ")
+```
+
+Map for the Total Suitable Area in the Economic zones:
+
+```{r warning=FALSE, messages=FALSE}
+# Total ggplot 
+ ggplot() +
+  geom_sf(data = wc_eez,
+          aes(fill = area)) + # total suitable area
+  paletteer::scale_fill_paletteer_c("ggthemes::Classic Green") +
+  theme_classic() +
+  labs(fill = "Total Suitable \nArea",
+       title = "Total Suitable Area for Oysters In West Coast EEZ")
+```
+
+## Develop a function to automate the processing of determining suitable area for marine aquaculture of other species on the west coast.
+
+Rest the west coast eez zones file:
+```{r include=TRUE, warning=FALSE, messages=FALSE}
+
+wc_eez <- st_read(here("data/wc_regions_clean.shp")) %>% 
+  rename(ID = rgn_id)
+```
+
+```{r include=TRUE, warning=FALSE, messages=FALSE}
+
+species_maps <- function(species, temp_low, temp_high, depth_low, depth_high) {
+  
+  # sea surface temperature:deg C
+  rcl_temp <- matrix(c(temp_low, temp_high, 1,
+                       -Inf, temp_low, NA,
+                       temp_high, Inf, NA),
+                     ncol = 3, byrow = TRUE)
+  
+  # reclassify
+  rcl_sst <- classify(sst_mean, 
+                      rcl = rcl_temp)
+  
+  # depth meters below sea level
+  rcl_depth <- matrix(c(depth_low, depth_high, 1, 
+                      -Inf, depth_low, NA,
+                      depth_high, Inf, NA),
+                      ncol = 3, byrow = TRUE)
+  
+  # reclassify
+  rcl_depth <- classify(depth_crop,
+                        rcl = rcl_depth)
+  
+  rast_mult <- function(layer1, layer2) {return(layer1*layer2)}
+  
+  #create stack of the reclassified data
+  depth_sst_stack <- c(rcl_sst, rcl_depth)
+  
+  # apply the function to each layer in the stack
+  depth_sst <- lapp(depth_sst_stack, # stacked data
+                    fun = rast_mult) 
+  
+  # rasterize the eez areas
+  id_rast = rasterize(vect(wc_eez), # create a SpatVector to make into a raster
+                    depth_sst, 
+                    field = "rgn") # select layer in database
+
+  # cells that are in the right spot
+  eez_suitable <- mask(id_rast, depth_sst)
+
+  # Compute the area covered by polygons or for all raster cells that are not NA in km
+  eez_zonal <- expanse(eez_suitable, 
+                     unit = "km", # output is km2 because its an area
+                     byValue = TRUE) %>% 
+    rename(rgn = value)
+  
+  # find the percentage of each zone that is suitable
+  wc_eez <- wc_eez %>% 
+    right_join(eez_zonal, by = "rgn", copy = TRUE) %>% 
+    mutate(percent = (area/area_km2)*100) # find percent
+
+  #Percent ggplot 
+  percent <- ggplot() +
+  geom_sf(data = wc_eez,
+          aes(fill = percent)) + # percent suitable area
+  paletteer::scale_fill_paletteer_c("ggthemes::Purple") +
+  theme_classic() +
+  labs(fill = "Percent Suitable \nArea",
+       title = species)
+  
+  # Total ggplot 
+  total <- ggplot() +
+  geom_sf(data = wc_eez,
+          aes(fill = area)) + # total suitable area
+  paletteer::scale_fill_paletteer_c("ggthemes::Classic Green") +
+  theme_classic() +
+  labs(fill = "Total Suitable \nArea",
+       title = species)
+  
+  map = total + percent
+  
+  return(map)
+
+}
+
+```
+
+Testing the function on a new range of temps and depths!
+
+```{r include=TRUE, warning=FALSE, message=FALSE}
+# testing the function 
+
+species_maps("Clam", 6, 12, -200, -30)
+```
