@@ -33,13 +33,6 @@ The Exclusive Economic Zones (EEZ) represent areas from coastlines that countrie
 -   Illustrate what EEZ have the greatest percentage and area for suitable marine aquaculture
 -   Create workflow to determine suitable marine aquaculture area for other species
 
-### Skills Highlight
-
--   combining vector and raster data\
--   resampling raster data\
--   masking raster data\
--   map algebra\
-
 ### Datasets
 
 The `stars` and `terra` packages will be useful for handling the raster data.
