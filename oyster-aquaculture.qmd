@@ -12,13 +12,61 @@ output:
 
 # Background
 
+Having protein alternatives is important for sustainable scaling of agriculture[^1] to meet the growing food demand. Given the amount of coastal area in many countries, understanding ways to use those resources is important. Marine aquaculture has the potential to play a key role in increasing food production, boosting economic growth in coastal areas, and help maintain clean waterways[^2].
+
+[^1]: Fisheries, N. (2022, September 15). Aquaculture supports a sustainable earth. https://www.fisheries.noaa.gov/feature-story/aquaculture-supports-sustainable-earth
+
+[^2]: Aragão, Cláudia, et al. "Alternative Proteins for Fish Diets: Implications beyond Growth." Animals : An Open Access Journal from MDPI, U.S. National Library of Medicine, 7 May 2022, www.ncbi.nlm.nih.gov/pmc/articles/PMC9103129/.
+
+Marine aquaculture potential is dictated by many variables including ship traffic, dissolved oxygen, bottom depth[^3]. Understanding what coastal areas have potential for different species can guide the implementation of marine aquaculture.
+
+[^3]: GEBCO Compilation Group (2022) GEBCO_2022 Grid (<doi:10.5285/e0f0bb80-ab44-2739-e053-6c86abc0289c>).
+
+The Exclusive Economic Zones (EEZ) represent areas from coastlines that countries have resource jurisdiction over, and could target for developing aquaculture. In this project, I am determing the locations in West Coast EEZ that are suitable for a variety of oyster aquaculture. The areas need to fit these specific conditions:\
+
+-   sea surface temperature: 11-30°C\
+-   depth: 0-70 meters below sea level
+
 ### Goals
 
--   An overview of the goals of the workflow
+-   Determine the suitability area in the Exclusive Economic Zones of the West Coast
+-   Illustrate what EEZ have the greatest percentage and area for suitable marine aquaculture
+-   Create workflow to determine suitable marine aquaculture area for other species
+
+### Skills Highlight
+
+-   combining vector and raster data\
+-   resampling raster data\
+-   masking raster data\
+-   map algebra\
 
 ### Datasets
 
--   including any references
+The `stars` and `terra` packages will be useful for handling the raster data.
+
+#### 1. Sea Surface Temperature
+
+This analysis will characterize sea surface temperature within the regions with sea surface temperature (SST) from 2008 to 2012. The data is originally generated from [NOAA's 5km Daily Global Satellite Sea Surface Temperature Anomaly v3.1](https://coralreefwatch.noaa.gov/product/5km/index_5km_ssta.php).
+
+This data is stored in the `sst_tifs` folder: - `average_annual_sst_2008.tif`\
+- `average_annual_sst_2009.tif`\
+- `average_annual_sst_2010.tif`\
+- `average_annual_sst_2011.tif`\
+- `average_annual_sst_2012.tif`\
+
+#### 2. Bathymetry
+
+To characterize the depth of the ocean we will use the [General Bathymetric Chart of the Oceans (GEBCO)](https://www.gebco.net/data_and_products/gridded_bathymetry_data/#area).[^4]
+
+[^4]: GEBCO Compilation Group (2022) GEBCO_2022 Grid (<doi:10.5285/e0f0bb80-ab44-2739-e053-6c86abc0289c>).
+
+-   read in bathymetry raster `depth.tif` for depth data
+
+#### 3. Exclusive Economic Zones
+
+Data on the Exclusive Economic Zones off the west coast of the US are from [Marineregions.org](https://www.marineregions.org/eez.php).
+
+-   load in the `wc_regions_clean.shp` file to access the EEZ shapefiles
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -37,15 +85,26 @@ library(paletteer)
 library(tmap)
 library(maps)
 library(patchwork)
+library(leaflet)
 ```
 
 ## Read in the Data
+
+Read in the EEZ and depth data:
 
 ```{r warning=FALSE, messages=FALSE}
 # load in data for west coast regions
 wc_eez <- st_read(here("data/wc_regions_clean.shp")) %>% 
   rename(ID = rgn_id)
 
+# read in bathymetry ocean depth data
+depth <- read_stars(here("data/depth.tif")) %>% 
+  rast()
+```
+
+Since there are multiple .tifs for the sea surface temperature data, I made a list and made a raster stack instead of individually reading in the files and then stacking them. Simplified!
+
+```{r warning=FALSE, messages=FALSE}
 # read in annual average sea surface temperatures
 file_names <- list.files("data/sst_tifs/",
                          full.names = TRUE)
@@ -54,25 +113,24 @@ file_names <- list.files("data/sst_tifs/",
 sst_stack <- rast(file_names)
 summary(sst_stack)
 class(sst_stack)
-
-# read in bathymetry ocean depth data
-depth <- read_stars(here("data/depth.tif")) %>% 
-  rast()
-
 ```
 
 ### Check the crs for the data
 
-```{r eval = FALSE}
+Check the crs of the data before continuing so that we dont run into trouble when we try to make them interact:
+
+```{r eval = FALSE, include = TRUE}
 # do the crs match?
 st_crs(wc_eez) == st_crs(sst_stack) # no they do not
 st_crs(wc_eez) == st_crs(depth) # yes
 
 ```
 
-The crs for the West Coast data and the Sea Surface temp rasters dont match. We have to re-project so that we can work on them together.
+The crs for the West Coast data and the Sea Surface temp rasters don't match. We have to re-project so that we can work on them together.
 
 ### Reproject
+
+To make sure that we can plot the sea surface temperature with the rest of the data we reproject to the crs of the west coast eez raster.
 
 ```{r warning=FALSE, messages=FALSE}
 # reproject sst_stack to same crs as wc
@@ -90,6 +148,8 @@ To use them together we need to make sure that the resolutions and extents of th
 
 ### Make raster with just the mean sea surface temp over the 2008-2012 time period.
 
+The temperature data is in Kelvin. To avoid having to transform the inputs of temperature parameters into Kelvin, we can change the means to Celsius bu substracting by 273.15 degrees.
+
 ```{r warning=FALSE, messages=FALSE}
 # mean from stack
 sst_mean_K <- terra::mean(sst_stack, 
@@ -103,6 +163,8 @@ sst_mean
 
 ### Get depth data with the same resolution as the sea surface temp mean and crop to the same extent as the sea surface temp raster.
 
+Use `resample` and `crop` from the `terra` package to match the resolutions and extents of the sst and depth data:
+
 ```{r include=TRUE, warning=FALSE, messages=FALSE}
 # resample depth to match resolution of sst
 depth_resample <- resample(depth, sst_mean,
@@ -115,7 +177,7 @@ depth_crop <- crop(depth_resample, sst_mean)
 
 **Check** the resolutions and extents of the depth and sst rasters:
 
-```{r eval = FALSE}
+```{r eval = FALSE, include = TRUE}
 # compare what the extents are visually 
 plot(depth)
 plot(sst_mean)
@@ -131,7 +193,9 @@ sst_mean
 
 ## Determine which locations are suitable for Oyster aquaculture using depth and temperature parameters.
 
-### Reclassify temperature raster using sea surface temperature: 11-30 deg C
+### Reclassify temperature raster:
+
+I am using the sea surface temperature that oysters can suitably grow in: 11-30 deg C - recalssify so that all values outside of the 11-30 degree range are NA
 
 ```{r include=TRUE, warning=FALSE, messages=FALSE}
 # sea surface temperature: 11-30&deg C
@@ -145,7 +209,9 @@ rcl_sst <- classify(sst_mean,
                     rcl = rcl_temp)
 ```
 
-### Reclassify depth raster using depth of 0-70 meters below sea level
+### Reclassify depth raster:
+
+I am using the depth range that oysters can suitably grow of 0-70 meters below sea level. This translates to -70 and 0 meters. Any values outside of this range will be NA.
 
 ```{r include=TRUE, warning=FALSE, messages=FALSE}
 # depth: 0-70 meters below sea level
@@ -160,7 +226,9 @@ rcl_depth <- classify(depth_crop,
 
 ```
 
-### Combine the reclassified depth and temp layers to find areas that are suitable for oysters
+### Combine the reclassified depth and temp layers to find areas that are suitable for oysters:
+
+Since the values in each raster are not the values of 1 (if suitable) and NA (if not suitable), we can perform map algebra and multiply the layers. Anywhere that there are NA's will return an NA value, and only the pixels that have a value of 1 in both layers will return a 1. Therefore, the resulting raster will only have 1's in the areas that match the suitability parameters in the depth AND the temp conditions.
 
 ```{r include=TRUE, warning=FALSE, messages=FALSE}
 # create multiplying function : layers that have 0 will multiply to 0 - only the places where it equals 1 in both will be 1 after multiplying 
@@ -185,9 +253,11 @@ depth_sst
 
 ## Determine suitability in the EEZ to investigate which areas have the most potential for oyster marine aquaculture.
 
-Percent of EEZ gives a guide for regions to understand the productivity/economic potential of the area, and quantifying the total area is good for understanding priority for investing in marine oystr aquaculture.
+To work with the EEZ data we can `rasterize` it using the raster we created above with suitable areas.
 
-```{r eval = FALSE, include=TRUE}
+This allows us to `mask` the EEZ data with the depth_sst data to identify what areas within the EEZ are suitable. To find the area that these pixels represent we can use the `expanse` function that sums the raster cells that are 1's and not NA's.
+
+```{r eval = TRUE, include=TRUE}
 # rasterize the eez areas
 id_rast = rasterize(vect(wc_eez), # create a SpatVector to make into a raster
                     depth_sst, 
@@ -200,50 +270,119 @@ eez_suitable <- mask(id_rast, depth_sst)
 eez_zonal <- expanse(eez_suitable, 
                      unit = "km", # output is km2 because its an area
                      byValue = TRUE)
+```
 
+We can then calculate the percent of each EEZ that is suitable for oyster aquaculture, and comapre it to the total area in each EEZ.
 
+```{r eval = TRUE, include=TRUE}
 # find the percentage of each zone that is suitable
-wc_eez <- wc_eez %>% 
+eez <- wc_eez %>% 
   mutate(area = eez_zonal$area,
          percent = (area/area_km2)*100) # find percent
 
 ```
 
-### Suitability area visualization!
+## Suitability area visualization!
 
-Map for the Percent Suitable Area in the Economic zones:
+This gives a guide for regions to understand the productivity/economic potential of the area, and quantifying the total area is good for understanding priority for investing in marine oyster aquaculture.
 
-```{r warning=FALSE, messages=FALSE}
-ggplot() +
-  geom_sf(data = wc_eez,
-          aes(fill = percent)) + # percent suitable area
-  paletteer::scale_fill_paletteer_c("ggthemes::Purple") +
-  theme_classic() +
-  labs(fill = "Percent Suitable \nArea",
-       title = "Percent Suitable Area for Oysters In West Coast EEZ")
+### Map for the Percent Suitable Area in the Economic zones:
+
+Create basemap:
+
+```{r}
+# basemap 
+basemap <- leaflet() %>% 
+  addProviderTiles(
+    "Esri.WorldImagery",
+    group = "Esri.WorldImagery"
+  ) %>%
+# add a layers control
+  addLayersControl(
+    baseGroups = c("Esri.WorldImagery")
+  )
 ```
 
-Map for the Total Suitable Area in the Economic zones:
+Leaflet map with basemap of percent suitable areas:
+
+```{r}
+
+pal <- colorNumeric(
+  c("#E1F5C4", "#B3E0A6FF", "#7DC370FF", "#59A253FF","#368747FF"),
+  # colors depend on the count variable
+  domain = eez$percent,
+  )
+
+
+map_percent <- basemap %>% 
+  addPolygons(data = eez,
+    # set the color of the polygon
+    color = ~pal(percent),
+    # set the fill opacity
+    fillOpacity = 0.9
+  ) %>%
+  # add a legend
+  addLegend(
+    data = eez,
+    pal = pal,
+    values = ~percent,
+    position = "bottomleft",
+    title = "Percent Suitable \nArea:",
+    opacity = 0.9
+  ) %>% 
+  addControl("Percent Suitable Area for Oysters In West Coast EEZ",
+             position = "bottomright",
+             )
+
+map_percent
+```
+
+### Map for the Total Suitable Area in the Economic zones:
 
 ```{r warning=FALSE, messages=FALSE}
-# Total ggplot 
- ggplot() +
-  geom_sf(data = wc_eez,
-          aes(fill = area)) + # total suitable area
-  paletteer::scale_fill_paletteer_c("ggthemes::Classic Green") +
-  theme_classic() +
-  labs(fill = "Total Suitable \nArea",
-       title = "Total Suitable Area for Oysters In West Coast EEZ")
+pal <- colorNumeric(
+  c("#F4D166FF", "#F8AF50FF", "#F38C30FF", "#EB6C1CFF","#CB4D22FF"),
+  # colors depend on the count variable
+  domain = eez$area,
+  )
+
+
+map_total <- basemap %>% 
+  addPolygons(data = eez,
+    # set the color of the polygon
+    color = ~pal(area),
+    # set the fill opacity
+    fillOpacity = 0.9
+  ) %>%
+  # add a legend
+  addLegend(
+    data = eez,
+    pal = pal,
+    values = ~area,
+    position = "bottomleft",
+    title = "Total Suitable \nArea:",
+    opacity = 0.9
+  ) %>% 
+    addControl("Total Suitable Area for Oysters In West Coast EEZ",
+             position = "bottomright",
+             )
+
+map_total
 ```
 
 ## Develop a function to automate the processing of determining suitable area for marine aquaculture of other species on the west coast.
 
-Rest the west coast eez zones file:
+Re-set the west coast eez zones file:
+
 ```{r include=TRUE, warning=FALSE, messages=FALSE}
 
 wc_eez <- st_read(here("data/wc_regions_clean.shp")) %>% 
   rename(ID = rgn_id)
 ```
+
+### The function `species_maps` :
+
+Takes in 5 parameters: `species`, `temp_low`, `temp_high`, `depth_low`, and `depth_high`. - Will produce two visualizations of maps that show percent rnak and total area rank for EEZ on the west coast of the US.
 
 ```{r include=TRUE, warning=FALSE, messages=FALSE}
 
