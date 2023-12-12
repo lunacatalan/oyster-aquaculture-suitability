@@ -22,18 +22,26 @@ Exclusive Economic Zones for the test species (eg. Clams).
 
 ## Skills Highlights
 
--   combining vector and raster data\
--   resampling raster data\
--   masking raster data\
--   map algebra\
+-   combining vector and raster data
+-   resampling raster data
+-   masking raster data
+-   map algebra
 
 Contents/Structure:
 
-EDS223-assignment4 │ README.md │ Rmd/Proj files\
-│ └───data │ wc_regions_clean.shp │ depth.tif │
-average_annual_sst_2008.tif │ average_annual_sst_2009.tif\
-│ average_annual_sst_2010.tif\
-│ average_annual_sst_2011.tif │ average_annual_sst_2012.tif
+
+    oyster-aquaculture-suitability
+        │ README.md 
+        │ Rmd/Proj files
+        │ 
+        └───data 
+             │ wc_regions_clean.shp 
+             │ depth.tif 
+             │ average_annual_sst_2008.tif 
+             │ average_annual_sst_2009.tif
+             │ average_annual_sst_2010.tif
+             │ average_annual_sst_2011.tif 
+             │ average_annual_sst_2012.tif
 
 Data Download Instructions:
 
