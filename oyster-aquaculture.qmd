@@ -77,6 +77,7 @@ library(terra)
 library(leaflet)
 library(patchwork)
 library(shiny)
+library(htmltools)
 ```
 
 ## Read in the Data
@@ -369,6 +370,7 @@ Re-set the west coast eez zones file:
 
 wc_eez <- st_read(here("data/wc_regions_clean.shp")) %>% 
   rename(ID = rgn_id)
+
 ```
 
 ### The function `species_maps` :
@@ -391,8 +393,8 @@ species_maps <- function(species, temp_low, temp_high, depth_low, depth_high) {
   
   # depth meters below sea level
   rcl_depth <- matrix(c(depth_low, depth_high, 1, 
-                        -Inf, depth_low, NA,
-                        depth_high, Inf, NA),
+                      -Inf, depth_low, NA,
+                      depth_high, Inf, NA),
                       ncol = 3, byrow = TRUE)
   
   # reclassify
@@ -410,18 +412,18 @@ species_maps <- function(species, temp_low, temp_high, depth_low, depth_high) {
   
   # rasterize the eez areas
   id_rast = rasterize(vect(wc_eez), # create a SpatVector to make into a raster
-                      depth_sst, 
-                      field = "rgn") # select layer in database
-  
+                    depth_sst, 
+                    field = "rgn") # select layer in database
+
   # cells that are in the right spot
   eez_suitable <- mask(id_rast, depth_sst)
-  
+
   # Compute the area covered by polygons or for all raster cells that are not NA in km
   eez_zonal <- expanse(eez_suitable, 
-                       unit = "km", # output is km2 because its an area
-                       byValue = TRUE) %>% 
+                     unit = "km", # output is km2 because its an area
+                     byValue = TRUE) %>% 
     rename(rgn = value)
-  
+
   
   # find the percentage of each zone that is suitable
   eez <- wc_eez %>% 
@@ -429,17 +431,17 @@ species_maps <- function(species, temp_low, temp_high, depth_low, depth_high) {
     mutate(percent_area = (area/area_km2)*100) # find percent
   
   pal <- colorNumeric(
-    c("#E1F5C4", "#B3E0A6FF", "#7DC370FF", "#59A253FF","#368747FF"),
-    # colors depend on the count variable
-    domain = eez$percent,
+  c("#E1F5C4", "#B3E0A6FF", "#7DC370FF", "#59A253FF","#368747FF"),
+  # colors depend on the count variable
+  domain = eez$percent,
   )
   
   percent <- leaflet(eez) %>%
     addPolygons(data = eez,
-                # set the color of the polygon
-                color = ~pal(percent_area),
-                # set the fill opacity
-                fillOpacity = 0.9) %>%
+    # set the color of the polygon
+    color = ~pal(percent_area),
+    # set the fill opacity
+    fillOpacity = 0.9) %>%
     addLegend(
       data = eez,
       pal = pal,
@@ -448,48 +450,48 @@ species_maps <- function(species, temp_low, temp_high, depth_low, depth_high) {
       title = "Total Suitable \nArea:",
       opacity = 0.9) %>% 
     addControl(paste("% Suitable Area <br> for", species), # updates with species input,
-               position = "bottomright",
-    ) %>% 
+             position = "bottomright",
+             ) %>% 
     addScaleBar() %>% # add scalebar
     addTiles() # add basemap
   
   pal <- colorNumeric(
-    c("#F4D166FF", "#F8AF50FF", "#F38C30FF", "#EB6C1CFF","#CB4D22FF"),
-    # colors depend on the count variable
-    domain = eez$area,
+  c("#F4D166FF", "#F8AF50FF", "#F38C30FF", "#EB6C1CFF","#CB4D22FF"),
+  # colors depend on the count variable
+  domain = eez$area,
   )
-  
-  map_total <- basemap %>% 
-    addPolygons(data = eez,
-                # set the color of the polygon
-                color = ~pal(area),
-                # set the fill opacity
-                fillOpacity = 0.9
-    ) %>%
-    # add a legend
-    addLegend(
-      data = eez,
-      pal = pal,
-      values = ~area,
-      position = "bottomleft",
-      title = "Total Suitable \nArea:",
-      opacity = 0.9
-    ) %>% 
+
+map_total <- basemap %>% 
+  addPolygons(data = eez,
+    # set the color of the polygon
+    color = ~pal(area),
+    # set the fill opacity
+    fillOpacity = 0.9
+  ) %>%
+  # add a legend
+  addLegend(
+    data = eez,
+    pal = pal,
+    values = ~area,
+    position = "bottomleft",
+    title = "Total Suitable \nArea:",
+    opacity = 0.9
+  ) %>% 
     addControl(paste("Total Suitable Area <br> for", species), # title that updates with species input
-               position = "bottomright") %>% 
-    addScaleBar() %>% 
-    addTiles()
-  
-  # put the leaflet maps next to each other
+             position = "bottomright") %>% 
+  addScaleBar() %>% 
+  addTiles()
+
+# put the leaflet maps next to each other
   map_grid <- 
     tagList(
       tags$table(width = "100%",
-                 tags$tr(
-                   tags$td(percent),
-                   tags$td(map_total)
-                 )
+        tags$tr(
+          tags$td(percent),
+          tags$td(map_total)
+        )
+        )
       )
-    )
   
   # show the maps
   return(map_grid)
@@ -498,10 +500,9 @@ species_maps <- function(species, temp_low, temp_high, depth_low, depth_high) {
 
 ```
 
-Testing the function on a new range of temps and depths!
+### Testing the function on a new range of temps and depths!
 
 ```{r include=TRUE, warning=FALSE, message=FALSE}
 # testing the function 
-
 species_maps("Clam", 6, 12, -200, -30)
 ```
